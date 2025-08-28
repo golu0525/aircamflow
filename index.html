@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Air Draw — Real-time Hand Drawing</title>
+  <style>
+    :root{--bg:#0f1724;--panel:#0b1220;--accent:#10b981;--muted:#94a3b8}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    body{background:linear-gradient(180deg,#071026 0%, #07192a 100%);color:#e6eef6;display:flex;align-items:center;justify-content:center;padding:18px}
+    .app{width:100%;max-width:1100px;background:radial-gradient(ellipse at top left, rgba(255,255,255,0.02), transparent),var(--panel);border-radius:12px;padding:14px;box-shadow:0 10px 30px rgba(2,6,23,0.6);display:grid;grid-template-columns:1fr 320px;gap:12px}
+    .stage{position:relative;border-radius:8px;overflow:hidden;background:#000;height:640px;display:flex;align-items:center;justify-content:center}
+    video#videoElement{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:0.15}
+    canvas#drawCanvas, canvas#overlay{position:absolute;left:0;top:0;width:100%;height:100%;}
+    .controls{padding:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);border-radius:8px;display:flex;flex-direction:column;gap:10px}
+    .controls h2{margin:0;font-size:18px}
+    label{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted)}
+    input[type=color], input[type=range], button, select{width:100%}
+    .row{display:flex;gap:8px}
+    button{background:transparent;border:1px solid rgba(255,255,255,0.08);padding:8px 10px;border-radius:8px;color:inherit;cursor:pointer}
+    button.primary{background:var(--accent);color:#042018;border:none}
+    .small{font-size:13px}
+    footer.small{font-size:12px;color:var(--muted);text-align:center;margin-top:6px}
+    .hint{font-size:13px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="stage">
+      <video id="videoElement" autoplay playsinline></video>
+      <canvas id="overlay"></canvas> <!-- drawing of hand boxes, pointer -->
+      <canvas id="drawCanvas"></canvas> <!-- persistent drawing strokes -->
+    </div>
+    <div class="controls">
+      <h2>Air Draw — Controls</h2>
+      <div>
+        <label class="small">Brush color</label>
+        <input id="colorPicker" type="color" value="#10b981">
+      </div>
+      <div>
+        <label class="small">Brush size: <span id="sizeLabel">6</span> px</label>
+        <input id="sizeRange" type="range" min="1" max="60" value="6">
+      </div>
+      <div>
+        <label class="small">Smoothing (0-0.99)</label>
+        <input id="smoothRange" type="range" min="0" max="99" value="70">
+      </div>
+      <div>
+        <label class="small">Drawing mode</label>
+        <select id="modeSelect">
+          <option value="index">Index finger (tip) — recommended</option>
+          <option value="pinch">Pinch to draw (index+thumb)</option>
+          <option value="always">Always draw (for testing)</option>
+        </select>
+      </div>
+      <div class="row">
+        <button id="undoBtn">Undo</button>
+        <button id="clearBtn">Clear</button>
+        <button id="saveBtn" class="primary">Save PNG</button>
+      </div>
+      <div class="hint">Tip: extend your index finger to draw. Use two fingers close together to pinch.</div>
+      <footer class="small">Built with MediaPipe Hands — works in modern Chromium-based browsers. Allow camera access.</footer>
+    </div>
+  </div>
+
+  <!-- MediaPipe libs (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <script>
+    // Elements
+    const video = document.getElementById('videoElement');
+    const overlay = document.getElementById('overlay');
+    const drawCanvas = document.getElementById('drawCanvas');
+    const overlayCtx = overlay.getContext('2d');
+    const drawCtx = drawCanvas.getContext('2d');
+
+    // Controls
+    const colorPicker = document.getElementById('colorPicker');
+    const sizeRange = document.getElementById('sizeRange');
+    const sizeLabel = document.getElementById('sizeLabel');
+    const smoothRange = document.getElementById('smoothRange');
+    const modeSelect = document.getElementById('modeSelect');
+    const clearBtn = document.getElementById('clearBtn');
+    const undoBtn = document.getElementById('undoBtn');
+    const saveBtn = document.getElementById('saveBtn');
+
+    let width = 1280, height = 720;
+    function resizeCanvases(){
+      // keep video ratio and fit into stage container
+      const rect = video.getBoundingClientRect();
+      width = rect.width; height = rect.height;
+      [overlay, drawCanvas].forEach(c=>{c.width = width; c.height = height; c.style.width = rect.width + 'px'; c.style.height = rect.height + 'px';});
+    }
+
+    // Drawing state
+    let lastPos = null;
+    let smoothing = 0.7; // exponential smoothing
+    const strokes = []; // history for undo (each stroke is array of points)
+    let currentStroke = null;
+
+    sizeRange.addEventListener('input', ()=>{ sizeLabel.textContent = sizeRange.value; });
+    smoothRange.addEventListener('input', ()=>{ smoothing = Number(smoothRange.value)/100; });
+
+    clearBtn.addEventListener('click', ()=>{ drawCtx.clearRect(0,0,drawCanvas.width,drawCanvas.height); strokes.length=0; });
+    undoBtn.addEventListener('click', ()=>{ strokes.pop(); redrawAll(); });
+    saveBtn.addEventListener('click', ()=>{
+      // save merged image (drawCanvas over a transparent background)
+      const link = document.createElement('a');
+      link.download = 'air-draw.png';
+      link.href = drawCanvas.toDataURL('image/png');
+      link.click();
+    });
+
+    function redrawAll(){
+      drawCtx.clearRect(0,0,drawCanvas.width,drawCanvas.height);
+      for(const s of strokes){
+        drawCtx.beginPath();
+        for(let i=0;i<s.points.length;i++){
+          const p = s.points[i];
+          if(i===0) drawCtx.moveTo(p.x,p.y);
+          else drawCtx.lineTo(p.x,p.y);
+        }
+        drawCtx.lineWidth = s.width;
+        drawCtx.lineCap = 'round';
+        drawCtx.strokeStyle = s.color;
+        drawCtx.stroke();
+      }
+    }
+
+    // MediaPipe Hands setup
+    const hands = new Hands({locateFile: (file) => {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.5
+    });
+
+    hands.onResults(onResults);
+
+    // start camera using MediaPipe Camera helper
+    const camera = new Camera(video, {
+      onFrame: async () => { await hands.send({image: video}); },
+      width: 1280,
+      height: 720
+    });
+
+    async function startCamera(){
+      try{
+        await camera.start();
+      }catch(e){
+        console.error('Camera start failed', e);
+        // fallback to getUserMedia
+        const stream = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720}});
+        video.srcObject = stream;
+        video.play();
+      }
+    }
+
+    function normalizedToCanvas(coord){
+      // coord is normalized [0..1], where x goes left->right for the source image.
+      // video is mirrored horizontally in this UI, so flip x when mapping.
+      return {
+        x: (1 - coord.x) * drawCanvas.width,
+        y: coord.y * drawCanvas.height
+      };
+    }
+
+    function distance(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.sqrt(dx*dx+dy*dy); }
+
+    function onResults(results){
+      // resize canvases to match video element
+      if(video.videoWidth && video.videoHeight){
+        if(overlay.width !== video.videoWidth || overlay.height !== video.videoHeight){
+          // update canvas sizes to displayed size
+          const rect = video.getBoundingClientRect();
+          overlay.width = drawCanvas.width = rect.width;
+          overlay.height = drawCanvas.height = rect.height;
+        }
+      }
+
+      // clear overlay
+      overlayCtx.clearRect(0,0,overlay.width,overlay.height);
+      overlayCtx.save();
+
+      if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
+        const landmarks = results.multiHandLandmarks[0];
+
+        // draw skeleton small overlay for feedback (mirrored)
+        drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, {color: '#888', lineWidth:2});
+        drawLandmarks(overlayCtx, landmarks, {color: '#fff', lineWidth:1});
+
+        // choose index fingertip (landmark 8) and index pip (6), thumb tip (4)
+        const tip = normalizedToCanvas(landmarks[8]);
+        const pip = normalizedToCanvas(landmarks[6]);
+        const thumbTip = normalizedToCanvas(landmarks[4]);
+
+        // draw pointer circle
+        overlayCtx.beginPath(); overlayCtx.arc(tip.x, tip.y, 8, 0, Math.PI*2); overlayCtx.fillStyle = 'rgba(16,185,129,0.9)'; overlayCtx.fill();
+
+        // Determine mode-based drawing condition
+        const mode = modeSelect.value;
+        let shouldDraw = false;
+
+        if(mode === 'always') shouldDraw = true;
+        else if(mode === 'index'){
+          // index extended if tip is above (smaller y) than pip (in camera coords y increases downward)
+          shouldDraw = (landmarks[8].y < landmarks[6].y);
+        }else if(mode === 'pinch'){
+          // pinch if distance between index tip and thumb tip small
+          const d = distance(tip, thumbTip);
+          shouldDraw = (d < 40);
+        }
+
+        // Smooth position
+        const target = {x: tip.x, y: tip.y};
+        if(!lastPos) lastPos = target;
+        lastPos = {x: lastPos.x + (target.x - lastPos.x)*(1 - smoothing), y: lastPos.y + (target.y - lastPos.y)*(1 - smoothing)};
+
+        if(shouldDraw){
+          if(!currentStroke){
+            currentStroke = {color: colorPicker.value, width: Number(sizeRange.value), points: [{x:lastPos.x,y:lastPos.y}]};
+            strokes.push(currentStroke);
+          } else {
+            currentStroke.points.push({x:lastPos.x,y:lastPos.y});
+          }
+          // draw incremental stroke to persistent canvas
+          drawCtx.beginPath();
+          const pts = currentStroke.points;
+          if(pts.length >= 2){
+            drawCtx.moveTo(pts[pts.length-2].x, pts[pts.length-2].y);
+            drawCtx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
+            drawCtx.lineWidth = currentStroke.width;
+            drawCtx.lineCap = 'round';
+            drawCtx.strokeStyle = currentStroke.color;
+            drawCtx.stroke();
+          }
+        } else {
+          // lift pen
+          currentStroke = null;
+        }
+
+      } else {
+        // no hands detected
+        lastPos = null;
+        currentStroke = null;
+      }
+
+      overlayCtx.restore();
+    }
+
+    // start
+    (async ()=>{
+      // try to get a typical size for video element so canvases match
+      await startCamera();
+      // small delay to ensure video dimensions available
+      setTimeout(()=>{
+        const rect = video.getBoundingClientRect();
+        overlay.width = drawCanvas.width = rect.width;
+        overlay.height = drawCanvas.height = rect.height;
+      },300);
+
+      // watch for window resize
+      window.addEventListener('resize', ()=>{ setTimeout(()=>{ const rect=video.getBoundingClientRect(); overlay.width=drawCanvas.width=rect.width; overlay.height=drawCanvas.height=rect.height; },120); });
+    })();
+
+    // helpers from drawing_utils are available (drawConnectors / drawLandmarks)
+  </script>
+</body>
+</html>
