@@ -12,27 +12,48 @@
     .stage{position:relative;border-radius:8px;overflow:hidden;background:#000;height:640px;display:flex;align-items:center;justify-content:center}
     video#videoElement{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:0.15}
     canvas#drawCanvas, canvas#overlay{position:absolute;left:0;top:0;width:100%;height:100%;}
-    .controls{padding:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);border-radius:8px;display:flex;flex-direction:column;gap:10px}
+    .controls{padding:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);border-radius:8px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;max-height:640px}
     .controls h2{margin:0;font-size:18px}
     label{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted)}
     input[type=color], input[type=range], button, select{width:100%}
     .row{display:flex;gap:8px}
-    button{background:transparent;border:1px solid rgba(255,255,255,0.08);padding:8px 10px;border-radius:8px;color:inherit;cursor:pointer}
+    button{background:transparent;border:1px solid rgba(255,255,255,0.08);padding:8px 10px;border-radius:8px;color:inherit;cursor:pointer;transition:background .15s}
+    button:hover{background:rgba(255,255,255,0.06)}
     button.primary{background:var(--accent);color:#042018;border:none}
+    button.primary:hover{background:#0ea572}
     .small{font-size:13px}
     footer.small{font-size:12px;color:var(--muted);text-align:center;margin-top:6px}
     .hint{font-size:13px;color:var(--muted)}
+    .section-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#4b5e78;margin-top:4px;border-top:1px solid rgba(255,255,255,0.05);padding-top:8px}
+    .toggle-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+    .toggle-row input[type=checkbox]{width:auto;accent-color:var(--accent)}
+    .tool-row{display:flex;gap:4px;flex-wrap:wrap}
+    .tool-btn{flex:1;min-width:50px;padding:6px 4px;font-size:12px;text-align:center;border-radius:6px;border:1px solid rgba(255,255,255,0.08);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}
+    .tool-btn.active{background:var(--accent);color:#042018;border-color:var(--accent);font-weight:600}
+    .tool-btn:hover:not(.active){background:rgba(255,255,255,0.06)}
+    .status-bar{display:flex;gap:6px;flex-wrap:wrap;font-size:11px;color:#4b5e78}
+    .status-tag{padding:2px 8px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06)}
+    .status-tag.active-tag{background:rgba(16,185,129,0.15);border-color:rgba(16,185,129,0.3);color:var(--accent)}
   </style>
 </head>
 <body>
   <div class="app">
     <div class="stage">
       <video id="videoElement" autoplay playsinline></video>
-      <canvas id="overlay"></canvas> <!-- drawing of hand boxes, pointer -->
-      <canvas id="drawCanvas"></canvas> <!-- persistent drawing strokes -->
+      <canvas id="overlay"></canvas>
+      <canvas id="drawCanvas"></canvas>
     </div>
     <div class="controls">
       <h2>Air Draw — Controls</h2>
+
+      <!-- Status bar -->
+      <div class="status-bar" id="statusBar">
+        <span class="status-tag" id="statusTool">✏️ Freehand</span>
+        <span class="status-tag" id="statusGesture">—</span>
+        <span class="status-tag" id="statusHands">No hands</span>
+      </div>
+
+      <div class="section-label">Brush</div>
       <div>
         <label class="small">Brush color</label>
         <input id="colorPicker" type="color" value="#10b981">
@@ -45,21 +66,70 @@
         <label class="small">Smoothing (0-0.99)</label>
         <input id="smoothRange" type="range" min="0" max="99" value="70">
       </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="pressureToggle">
+        <label for="pressureToggle" class="small" style="margin:0">Finger pressure (size varies by extension)</label>
+      </div>
+
+      <div class="section-label">Tool</div>
+      <div class="tool-row">
+        <button class="tool-btn active" data-tool="freehand">✏️ Free</button>
+        <button class="tool-btn" data-tool="line">╱ Line</button>
+        <button class="tool-btn" data-tool="rect">▭ Rect</button>
+        <button class="tool-btn" data-tool="circle">◯ Circle</button>
+        <button class="tool-btn" data-tool="arrow">→ Arrow</button>
+      </div>
+
+      <div class="section-label">Drawing Mode</div>
       <div>
-        <label class="small">Drawing mode</label>
         <select id="modeSelect">
           <option value="index">Index finger (tip) — recommended</option>
           <option value="pinch">Pinch to draw (index+thumb)</option>
           <option value="always">Always draw (for testing)</option>
         </select>
       </div>
-      <div class="row">
-        <button id="undoBtn">Undo</button>
-        <button id="clearBtn">Clear</button>
-        <button id="saveBtn" class="primary">Save PNG</button>
+
+      <div class="section-label">Advanced</div>
+      <div class="toggle-row">
+        <input type="checkbox" id="twoHandToggle">
+        <label for="twoHandToggle" class="small" style="margin:0">✋✋ Two-hand mode (left=tool, right=draw)</label>
       </div>
-      <div class="hint">Tip: extend your index finger to draw. Use two fingers close together to pinch.</div>
-      <footer class="small">Built with MediaPipe Hands — works in modern Chromium-based browsers. Allow camera access.</footer>
+      <div class="toggle-row">
+        <input type="checkbox" id="gestureUndoToggle" checked>
+        <label for="gestureUndoToggle" class="small" style="margin:0">Gesture undo/redo (swipe open palm)</label>
+      </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="gesturePaletteToggle" checked>
+        <label for="gesturePaletteToggle" class="small" style="margin:0">Gesture palette (fist to open colors)</label>
+      </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="zoomPanToggle">
+        <label for="zoomPanToggle" class="small" style="margin:0">Zoom &amp; pan (open palm to pan)</label>
+      </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="shapeSnapToggle" checked>
+        <label for="shapeSnapToggle" class="small" style="margin:0">🔷 AI Shape Snap (auto-detect shapes)</label>
+      </div>
+
+      <div class="section-label">Actions</div>
+      <div class="row">
+        <button id="undoBtn">↩ Undo</button>
+        <button id="redoBtn">↪ Redo</button>
+      </div>
+      <div class="row">
+        <button id="clearBtn">🗑 Clear</button>
+        <button id="resetViewBtn">⊞ Reset View</button>
+      </div>
+      <button id="saveBtn" class="primary">💾 Save PNG</button>
+
+      <div class="section-label">OCR — Handwriting Recognition</div>
+      <button id="ocrBtn">🔤 Recognize Text</button>
+      <div id="ocrResult" style="font-size:13px;color:var(--muted);min-height:20px;padding:6px 8px;background:rgba(255,255,255,0.03);border-radius:6px;border:1px solid rgba(255,255,255,0.06);word-break:break-word;max-height:100px;overflow-y:auto;user-select:text"></div>
+
+      <div class="hint">
+        <strong>Gestures:</strong> Index finger=draw · Open palm swipe=undo/redo · Fist=color palette · Left hand fingers=select tool
+      </div>
+      <footer class="small">Built with MediaPipe Hands · Chromium browsers · Allow camera access</footer>
     </div>
   </div>
 
@@ -67,16 +137,19 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <!-- Tesseract.js OCR (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
   <script>
-    // Elements
+    // ──────────────────────────────────────────────
+    //  DOM ELEMENTS
+    // ──────────────────────────────────────────────
     const video = document.getElementById('videoElement');
     const overlay = document.getElementById('overlay');
     const drawCanvas = document.getElementById('drawCanvas');
     const overlayCtx = overlay.getContext('2d');
     const drawCtx = drawCanvas.getContext('2d');
 
-    // Controls
     const colorPicker = document.getElementById('colorPicker');
     const sizeRange = document.getElementById('sizeRange');
     const sizeLabel = document.getElementById('sizeLabel');
@@ -84,52 +157,546 @@
     const modeSelect = document.getElementById('modeSelect');
     const clearBtn = document.getElementById('clearBtn');
     const undoBtn = document.getElementById('undoBtn');
+    const redoBtn = document.getElementById('redoBtn');
     const saveBtn = document.getElementById('saveBtn');
+    const resetViewBtn = document.getElementById('resetViewBtn');
+    const pressureToggle = document.getElementById('pressureToggle');
+    const twoHandToggle = document.getElementById('twoHandToggle');
+    const gestureUndoToggle = document.getElementById('gestureUndoToggle');
+    const gesturePaletteToggle = document.getElementById('gesturePaletteToggle');
+    const zoomPanToggle = document.getElementById('zoomPanToggle');
+    const statusTool = document.getElementById('statusTool');
+    const statusGesture = document.getElementById('statusGesture');
+    const statusHands = document.getElementById('statusHands');
+    const shapeSnapToggle = document.getElementById('shapeSnapToggle');
+    const ocrBtn = document.getElementById('ocrBtn');
+    const ocrResult = document.getElementById('ocrResult');
 
-    let width = 1280, height = 720;
-    function resizeCanvases(){
-      // keep video ratio and fit into stage container
-      const rect = video.getBoundingClientRect();
-      width = rect.width; height = rect.height;
-      [overlay, drawCanvas].forEach(c=>{c.width = width; c.height = height; c.style.width = rect.width + 'px'; c.style.height = rect.height + 'px';});
+    // Tool buttons
+    const toolBtns = document.querySelectorAll('.tool-btn');
+    let currentTool = 'freehand';
+    toolBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentTool = btn.dataset.tool;
+        toolBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        updateStatusBar();
+      });
+    });
+
+    function setToolByName(name) {
+      currentTool = name;
+      toolBtns.forEach(b => { b.classList.toggle('active', b.dataset.tool === name); });
+      updateStatusBar();
     }
 
-    // Drawing state
+    // ──────────────────────────────────────────────
+    //  STATE
+    // ──────────────────────────────────────────────
+    let smoothing = 0.7;
     let lastPos = null;
-    let smoothing = 0.7; // exponential smoothing
-    const strokes = []; // history for undo (each stroke is array of points)
+    const strokes = [];
+    const redoStack = [];
     let currentStroke = null;
 
-    sizeRange.addEventListener('input', ()=>{ sizeLabel.textContent = sizeRange.value; });
-    smoothRange.addEventListener('input', ()=>{ smoothing = Number(smoothRange.value)/100; });
+    // Shape tool state
+    let shapeStart = null; // {x,y} canvas coords where shape began
+    let shapeActive = false;
 
-    clearBtn.addEventListener('click', ()=>{ drawCtx.clearRect(0,0,drawCanvas.width,drawCanvas.height); strokes.length=0; });
-    undoBtn.addEventListener('click', ()=>{ strokes.pop(); redrawAll(); });
-    saveBtn.addEventListener('click', ()=>{
-      // save merged image (drawCanvas over a transparent background)
+    // Gesture undo/redo state
+    let prevPalmX = null;
+    let gestureUndoCooldown = 0;
+
+    // Gesture palette state
+    let fistStartTime = 0;
+    let paletteVisible = false;
+    let palettePos = {x: 0, y: 0};
+    const PALETTE_COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#10b981','#3b82f6','#8b5cf6','#ec4899'];
+    const PALETTE_RADIUS = 70;
+
+    // Zoom & pan state
+    let viewTransform = {offsetX: 0, offsetY: 0, scale: 1};
+    let isPanning = false;
+    let panLastPos = null;
+
+    // Two-hand state
+    let twoHandActive = false;
+    let leftHandFingerCount = 0;
+
+    // Overlay feedback messages
+    let overlayMsg = '';
+    let overlayMsgTimer = 0;
+
+    // ──────────────────────────────────────────────
+    //  CONTROLS
+    // ──────────────────────────────────────────────
+    sizeRange.addEventListener('input', () => { sizeLabel.textContent = sizeRange.value; });
+    smoothRange.addEventListener('input', () => { smoothing = Number(smoothRange.value) / 100; });
+
+    clearBtn.addEventListener('click', () => {
+      drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      strokes.length = 0;
+      redoStack.length = 0;
+    });
+
+    undoBtn.addEventListener('click', doUndo);
+    redoBtn.addEventListener('click', doRedo);
+
+    saveBtn.addEventListener('click', () => {
       const link = document.createElement('a');
       link.download = 'air-draw.png';
       link.href = drawCanvas.toDataURL('image/png');
       link.click();
     });
 
-    function redrawAll(){
-      drawCtx.clearRect(0,0,drawCanvas.width,drawCanvas.height);
-      for(const s of strokes){
-        drawCtx.beginPath();
-        for(let i=0;i<s.points.length;i++){
-          const p = s.points[i];
-          if(i===0) drawCtx.moveTo(p.x,p.y);
-          else drawCtx.lineTo(p.x,p.y);
+    resetViewBtn.addEventListener('click', () => {
+      viewTransform = {offsetX: 0, offsetY: 0, scale: 1};
+      redrawAll();
+    });
+
+    twoHandToggle.addEventListener('change', () => {
+      twoHandActive = twoHandToggle.checked;
+      hands.setOptions({ maxNumHands: twoHandActive ? 2 : 1 });
+      updateStatusBar();
+    });
+
+    function doUndo() {
+      if (strokes.length === 0) return;
+      redoStack.push(strokes.pop());
+      redrawAll();
+    }
+
+    function doRedo() {
+      if (redoStack.length === 0) return;
+      strokes.push(redoStack.pop());
+      redrawAll();
+    }
+
+    function showOverlayMsg(msg) {
+      overlayMsg = msg;
+      overlayMsgTimer = Date.now() + 800;
+    }
+
+    function updateStatusBar() {
+      const toolNames = {freehand:'✏️ Freehand', line:'╱ Line', rect:'▭ Rect', circle:'◯ Circle', arrow:'→ Arrow'};
+      statusTool.textContent = toolNames[currentTool] || currentTool;
+    }
+
+    // ──────────────────────────────────────────────
+    //  GESTURE HELPERS
+    // ──────────────────────────────────────────────
+
+    // Finger tip/pip landmark pairs: [tip, pip] for index, middle, ring, pinky
+    const FINGER_PAIRS = [[8,6],[12,10],[16,14],[20,18]];
+
+    function isFingerExtended(landmarks, tipIdx, pipIdx) {
+      return landmarks[tipIdx].y < landmarks[pipIdx].y;
+    }
+
+    function isThumbExtended(landmarks) {
+      // Thumb: tip (4) is further from wrist (0) than IP joint (3) in x
+      return Math.abs(landmarks[4].x - landmarks[0].x) > Math.abs(landmarks[3].x - landmarks[0].x);
+    }
+
+    function countExtendedFingers(landmarks) {
+      let count = 0;
+      if (isThumbExtended(landmarks)) count++;
+      for (const [tip, pip] of FINGER_PAIRS) {
+        if (isFingerExtended(landmarks, tip, pip)) count++;
+      }
+      return count;
+    }
+
+    function isFist(landmarks) {
+      // All 4 fingers curled (not extended), thumb can be either
+      for (const [tip, pip] of FINGER_PAIRS) {
+        if (isFingerExtended(landmarks, tip, pip)) return false;
+      }
+      return true;
+    }
+
+    function isOpenPalm(landmarks) {
+      return countExtendedFingers(landmarks) >= 5;
+    }
+
+    function getFingerExtension(landmarks) {
+      // Ratio of tip-to-MCP distance vs MCP-to-wrist distance for index finger
+      // landmarks: 8=tip, 5=MCP, 0=wrist
+      const tipToMcp = Math.hypot(landmarks[8].x - landmarks[5].x, landmarks[8].y - landmarks[5].y);
+      const mcpToWrist = Math.hypot(landmarks[5].x - landmarks[0].x, landmarks[5].y - landmarks[0].y);
+      if (mcpToWrist < 0.001) return 0.5;
+      return Math.min(Math.max(tipToMcp / mcpToWrist, 0), 2);
+    }
+
+    function getPalmCenter(landmarks) {
+      // Average of wrist(0) and middle MCP(9)
+      return {
+        x: (landmarks[0].x + landmarks[9].x) / 2,
+        y: (landmarks[0].y + landmarks[9].y) / 2
+      };
+    }
+
+    // ──────────────────────────────────────────────
+    //  AI SHAPE RECOGNITION
+    // ──────────────────────────────────────────────
+
+    function recognizeShape(points) {
+      // Minimum points to attempt recognition
+      if (!points || points.length < 10) return null;
+
+      const n = points.length;
+      const xs = points.map(p => p.x);
+      const ys = points.map(p => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const bboxW = maxX - minX;
+      const bboxH = maxY - minY;
+      const diagonal = Math.hypot(bboxW, bboxH);
+
+      // Too small to recognize
+      if (diagonal < 20) return null;
+
+      // Centroid
+      const cx = xs.reduce((a, b) => a + b, 0) / n;
+      const cy = ys.reduce((a, b) => a + b, 0) / n;
+
+      // Closedness: distance between first and last point relative to bounding box
+      const startEnd = Math.hypot(points[0].x - points[n - 1].x, points[0].y - points[n - 1].y);
+      const isClosed = startEnd < diagonal * 0.2;
+
+      // Total path length
+      let pathLen = 0;
+      for (let i = 1; i < n; i++) {
+        pathLen += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+      }
+
+      // Straight line distance (first to last)
+      const directLen = Math.hypot(points[n - 1].x - points[0].x, points[n - 1].y - points[0].y);
+
+      // ── Line detection ──
+      if (!isClosed && directLen > 30) {
+        const straightness = directLen / pathLen; // 1.0 = perfectly straight
+        if (straightness > 0.85) {
+          return {
+            type: 'line',
+            confidence: straightness,
+            params: { start: {x: points[0].x, y: points[0].y}, end: {x: points[n - 1].x, y: points[n - 1].y} }
+          };
         }
-        drawCtx.lineWidth = s.width;
-        drawCtx.lineCap = 'round';
-        drawCtx.strokeStyle = s.color;
-        drawCtx.stroke();
+      }
+
+      if (!isClosed) return null; // Remaining shapes require closure
+
+      // ── Circle detection ──
+      // Check if all points are roughly equidistant from centroid
+      const radii = points.map(p => Math.hypot(p.x - cx, p.y - cy));
+      const avgR = radii.reduce((a, b) => a + b, 0) / n;
+      const stdR = Math.sqrt(radii.reduce((a, r) => a + (r - avgR) ** 2, 0) / n);
+      const circularity = 1 - (stdR / avgR); // 1.0 = perfect circle
+
+      // ── Rectangle detection ──
+      // Check how well points fill the bounding box corners
+      // Sample angles from centroid and check for ~4 direction changes
+      const angles = points.map(p => Math.atan2(p.y - cy, p.x - cx));
+      let directionChanges = 0;
+      const cornerThreshold = 0.3; // radians
+      for (let i = 2; i < n; i++) {
+        const a1 = Math.atan2(points[i].y - points[i - 1].y, points[i].x - points[i - 1].x);
+        const a0 = Math.atan2(points[i - 1].y - points[i - 2].y, points[i - 1].x - points[i - 2].x);
+        let diff = Math.abs(a1 - a0);
+        if (diff > Math.PI) diff = 2 * Math.PI - diff;
+        if (diff > cornerThreshold) directionChanges++;
+      }
+
+      // Rectangle: ~4 sharp corners, aspect ratio check, points near bounding box edges
+      const aspectRatio = Math.min(bboxW, bboxH) / Math.max(bboxW, bboxH);
+      // Count points near each edge of the bounding box
+      const edgeMargin = diagonal * 0.15;
+      let nearTop = 0, nearBottom = 0, nearLeft = 0, nearRight = 0;
+      for (const p of points) {
+        if (Math.abs(p.y - minY) < edgeMargin) nearTop++;
+        if (Math.abs(p.y - maxY) < edgeMargin) nearBottom++;
+        if (Math.abs(p.x - minX) < edgeMargin) nearLeft++;
+        if (Math.abs(p.x - maxX) < edgeMargin) nearRight++;
+      }
+      const edgeCoverage = Math.min(nearTop, nearBottom, nearLeft, nearRight) / (n * 0.1);
+      const rectScore = Math.min(edgeCoverage, 1) * 0.6 + (aspectRatio > 0.3 ? 0.2 : 0) + (directionChanges > 3 && directionChanges < 20 ? 0.2 : 0);
+
+      // Pick best match
+      if (circularity > 0.8 && circularity > rectScore) {
+        return {
+          type: 'circle',
+          confidence: circularity,
+          params: { cx, cy, radius: avgR }
+        };
+      }
+      if (rectScore > 0.7) {
+        return {
+          type: 'rect',
+          confidence: rectScore,
+          params: { start: {x: minX, y: minY}, end: {x: maxX, y: maxY} }
+        };
+      }
+      if (circularity > 0.7) {
+        return {
+          type: 'circle',
+          confidence: circularity,
+          params: { cx, cy, radius: avgR }
+        };
+      }
+
+      return null;
+    }
+
+    function trySnapLastStroke() {
+      if (!shapeSnapToggle.checked) return;
+      if (strokes.length === 0) return;
+      const last = strokes[strokes.length - 1];
+      if (last.type === 'shape') return; // Already a shape
+      if (!last.points || last.points.length < 10) return;
+
+      const result = recognizeShape(last.points);
+      if (!result || result.confidence < 0.7) return;
+
+      const color = last.color;
+      const width = last.width;
+      let snapped;
+
+      if (result.type === 'line') {
+        snapped = { type: 'shape', shape: 'line', start: result.params.start, end: result.params.end, color, width };
+      } else if (result.type === 'circle') {
+        const r = result.params.radius;
+        snapped = {
+          type: 'shape', shape: 'circle',
+          start: { x: result.params.cx, y: result.params.cy },
+          end: { x: result.params.cx + r, y: result.params.cy },
+          color, width
+        };
+      } else if (result.type === 'rect') {
+        snapped = { type: 'shape', shape: 'rect', start: result.params.start, end: result.params.end, color, width };
+      }
+
+      if (snapped) {
+        strokes[strokes.length - 1] = snapped;
+        redrawAll();
+        const icons = { line: '📏', circle: '⭕', rect: '🔷' };
+        showOverlayMsg(`${icons[result.type] || '✨'} Snapped to ${result.type} (${Math.round(result.confidence * 100)}%)`);
       }
     }
 
-    // MediaPipe Hands setup
+    // ──────────────────────────────────────────────
+    //  OCR — HANDWRITING RECOGNITION
+    // ──────────────────────────────────────────────
+
+    let ocrWorker = null;
+
+    ocrBtn.addEventListener('click', runOCR);
+
+    async function runOCR() {
+      ocrResult.textContent = '⏳ Recognizing text...';
+      ocrBtn.disabled = true;
+
+      try {
+        // Create preprocessed canvas: dark strokes on white background
+        const tempCanvas = document.createElement('canvas');
+        const scale = 2; // upscale for better accuracy
+        tempCanvas.width = drawCanvas.width * scale;
+        tempCanvas.height = drawCanvas.height * scale;
+        const tempCtx = tempCanvas.getContext('2d');
+
+        // White background
+        tempCtx.fillStyle = '#ffffff';
+        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+        // Draw strokes in black for max contrast
+        tempCtx.save();
+        tempCtx.scale(scale, scale);
+        tempCtx.translate(viewTransform.offsetX, viewTransform.offsetY);
+        tempCtx.scale(viewTransform.scale, viewTransform.scale);
+        for (const s of strokes) {
+          // Temporarily override color to black
+          const origColor = s.color;
+          s.color = '#000000';
+          drawStrokeOnCtx(tempCtx, s);
+          s.color = origColor;
+        }
+        tempCtx.restore();
+
+        // Run Tesseract OCR
+        const { data } = await Tesseract.recognize(tempCanvas, 'eng', {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              ocrResult.textContent = `⏳ Recognizing... ${Math.round((m.progress || 0) * 100)}%`;
+            }
+          }
+        });
+
+        const text = (data.text || '').trim();
+        if (text) {
+          ocrResult.textContent = text;
+          showOverlayMsg('🔤 Text recognized');
+        } else {
+          ocrResult.textContent = 'No text found. Try drawing larger letters.';
+        }
+      } catch (err) {
+        console.error('OCR error:', err);
+        ocrResult.textContent = '❌ OCR failed: ' + err.message;
+      } finally {
+        ocrBtn.disabled = false;
+      }
+    }
+
+    // ──────────────────────────────────────────────
+    //  DRAWING HELPERS
+    // ──────────────────────────────────────────────
+
+    function normalizedToCanvas(coord) {
+      return {
+        x: (1 - coord.x) * drawCanvas.width,
+        y: coord.y * drawCanvas.height
+      };
+    }
+
+    function canvasToView(pt) {
+      // Apply zoom/pan transform
+      return {
+        x: (pt.x - viewTransform.offsetX) / viewTransform.scale,
+        y: (pt.y - viewTransform.offsetY) / viewTransform.scale
+      };
+    }
+
+    function distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+    function drawStrokeOnCtx(ctx, s) {
+      if (s.type === 'shape') {
+        drawShapeOnCtx(ctx, s);
+        return;
+      }
+      // Freehand stroke — variable width if points have .w
+      if (s.points.length < 2) return;
+      const hasVarWidth = s.points[0].w !== undefined;
+      if (hasVarWidth) {
+        // Draw each segment with its own width
+        for (let i = 1; i < s.points.length; i++) {
+          ctx.beginPath();
+          ctx.moveTo(s.points[i - 1].x, s.points[i - 1].y);
+          ctx.lineTo(s.points[i].x, s.points[i].y);
+          ctx.lineWidth = s.points[i].w || s.width;
+          ctx.lineCap = 'round';
+          ctx.strokeStyle = s.color;
+          ctx.stroke();
+        }
+      } else {
+        ctx.beginPath();
+        for (let i = 0; i < s.points.length; i++) {
+          if (i === 0) ctx.moveTo(s.points[i].x, s.points[i].y);
+          else ctx.lineTo(s.points[i].x, s.points[i].y);
+        }
+        ctx.lineWidth = s.width;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = s.color;
+        ctx.stroke();
+      }
+    }
+
+    function drawShapeOnCtx(ctx, s) {
+      ctx.beginPath();
+      ctx.lineWidth = s.width;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = s.color;
+      const sx = s.start.x, sy = s.start.y, ex = s.end.x, ey = s.end.y;
+
+      if (s.shape === 'line') {
+        ctx.moveTo(sx, sy); ctx.lineTo(ex, ey);
+        ctx.stroke();
+      } else if (s.shape === 'rect') {
+        ctx.strokeRect(sx, sy, ex - sx, ey - sy);
+      } else if (s.shape === 'circle') {
+        const r = distance(s.start, s.end);
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (s.shape === 'arrow') {
+        ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+        // Arrowhead
+        const angle = Math.atan2(ey - sy, ex - sx);
+        const headLen = Math.max(12, s.width * 3);
+        ctx.beginPath();
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex - headLen * Math.cos(angle - 0.4), ey - headLen * Math.sin(angle - 0.4));
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex - headLen * Math.cos(angle + 0.4), ey - headLen * Math.sin(angle + 0.4));
+        ctx.stroke();
+      }
+    }
+
+    function drawShapePreview(ctx, start, end, shape, color, width) {
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      drawShapeOnCtx(ctx, {type: 'shape', shape, start, end, color, width});
+      ctx.restore();
+    }
+
+    function redrawAll() {
+      drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      drawCtx.save();
+      drawCtx.translate(viewTransform.offsetX, viewTransform.offsetY);
+      drawCtx.scale(viewTransform.scale, viewTransform.scale);
+      for (const s of strokes) {
+        drawStrokeOnCtx(drawCtx, s);
+      }
+      drawCtx.restore();
+    }
+
+    // ──────────────────────────────────────────────
+    //  PALETTE DRAWING
+    // ──────────────────────────────────────────────
+    function drawPalette(ctx, cx, cy) {
+      const r = PALETTE_RADIUS;
+      // Background ring
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + 10, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fill();
+
+      // Color swatches
+      const n = PALETTE_COLORS.length;
+      for (let i = 0; i < n; i++) {
+        const angle = (i / n) * Math.PI * 2 - Math.PI / 2;
+        const sx = cx + Math.cos(angle) * (r * 0.6);
+        const sy = cy + Math.sin(angle) * (r * 0.6);
+        ctx.beginPath();
+        ctx.arc(sx, sy, 14, 0, Math.PI * 2);
+        ctx.fillStyle = PALETTE_COLORS[i];
+        ctx.fill();
+        ctx.lineWidth = colorPicker.value === PALETTE_COLORS[i] ? 3 : 1;
+        ctx.strokeStyle = colorPicker.value === PALETTE_COLORS[i] ? '#fff' : 'rgba(255,255,255,0.3)';
+        ctx.stroke();
+      }
+
+      // Center: current color
+      ctx.beginPath();
+      ctx.arc(cx, cy, 16, 0, Math.PI * 2);
+      ctx.fillStyle = colorPicker.value;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#fff';
+      ctx.stroke();
+    }
+
+    function getPaletteColorAtPos(cx, cy, px, py) {
+      const n = PALETTE_COLORS.length;
+      for (let i = 0; i < n; i++) {
+        const angle = (i / n) * Math.PI * 2 - Math.PI / 2;
+        const sx = cx + Math.cos(angle) * (PALETTE_RADIUS * 0.6);
+        const sy = cy + Math.sin(angle) * (PALETTE_RADIUS * 0.6);
+        if (Math.hypot(px - sx, py - sy) < 20) return PALETTE_COLORS[i];
+      }
+      return null;
+    }
+
+    // ──────────────────────────────────────────────
+    //  MEDIAPIPE SETUP
+    // ──────────────────────────────────────────────
     const hands = new Hands({locateFile: (file) => {
       return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
     }});
@@ -143,133 +710,356 @@
 
     hands.onResults(onResults);
 
-    // start camera using MediaPipe Camera helper
     const camera = new Camera(video, {
       onFrame: async () => { await hands.send({image: video}); },
-      width: 1280,
-      height: 720
+      width: 1280, height: 720
     });
 
-    async function startCamera(){
-      try{
-        await camera.start();
-      }catch(e){
+    async function startCamera() {
+      try { await camera.start(); }
+      catch(e) {
         console.error('Camera start failed', e);
-        // fallback to getUserMedia
         const stream = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720}});
         video.srcObject = stream;
         video.play();
       }
     }
 
-    function normalizedToCanvas(coord){
-      // coord is normalized [0..1], where x goes left->right for the source image.
-      // video is mirrored horizontally in this UI, so flip x when mapping.
-      return {
-        x: (1 - coord.x) * drawCanvas.width,
-        y: coord.y * drawCanvas.height
-      };
-    }
-
-    function distance(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.sqrt(dx*dx+dy*dy); }
-
-    function onResults(results){
-      // resize canvases to match video element
-      if(video.videoWidth && video.videoHeight){
-        if(overlay.width !== video.videoWidth || overlay.height !== video.videoHeight){
-          // update canvas sizes to displayed size
-          const rect = video.getBoundingClientRect();
+    // ──────────────────────────────────────────────
+    //  MAIN RESULTS HANDLER
+    // ──────────────────────────────────────────────
+    function onResults(results) {
+      // Resize canvases
+      if (video.videoWidth && video.videoHeight) {
+        const rect = video.getBoundingClientRect();
+        if (overlay.width !== Math.round(rect.width) || overlay.height !== Math.round(rect.height)) {
           overlay.width = drawCanvas.width = rect.width;
           overlay.height = drawCanvas.height = rect.height;
+          redrawAll();
         }
       }
 
-      // clear overlay
-      overlayCtx.clearRect(0,0,overlay.width,overlay.height);
+      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
       overlayCtx.save();
 
-      if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
-        const landmarks = results.multiHandLandmarks[0];
+      const allHands = results.multiHandLandmarks || [];
+      const allHandedness = results.multiHandedness || [];
+      statusHands.textContent = allHands.length === 0 ? 'No hands' : `${allHands.length} hand${allHands.length>1?'s':''}`;
+      statusHands.classList.toggle('active-tag', allHands.length > 0);
 
-        // draw skeleton small overlay for feedback (mirrored)
-        drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, {color: '#888', lineWidth:2});
-        drawLandmarks(overlayCtx, landmarks, {color: '#fff', lineWidth:1});
+      if (allHands.length === 0) {
+        lastPos = null;
+        currentStroke = null;
+        shapeStart = null;
+        shapeActive = false;
+        prevPalmX = null;
+        isPanning = false;
+        panLastPos = null;
+        if (paletteVisible) paletteVisible = false;
+        statusGesture.textContent = '—';
+        overlayCtx.restore();
+        drawOverlayMsg();
+        return;
+      }
 
-        // choose index fingertip (landmark 8) and index pip (6), thumb tip (4)
-        const tip = normalizedToCanvas(landmarks[8]);
-        const pip = normalizedToCanvas(landmarks[6]);
-        const thumbTip = normalizedToCanvas(landmarks[4]);
+      // ── Determine drawing hand vs tool hand ──
+      let drawHandIdx = 0;
+      let toolHandIdx = -1;
 
-        // draw pointer circle
-        overlayCtx.beginPath(); overlayCtx.arc(tip.x, tip.y, 8, 0, Math.PI*2); overlayCtx.fillStyle = 'rgba(16,185,129,0.9)'; overlayCtx.fill();
+      if (twoHandActive && allHands.length === 2) {
+        // Use handedness: MediaPipe labels from camera POV, so "Right" in label = user's left hand (mirrored)
+        // We'll use index 0 as tool, index 1 as draw, unless we can detect handedness
+        const label0 = (allHandedness[0]?.label || '').toLowerCase();
+        const label1 = (allHandedness[1]?.label || '').toLowerCase();
+        // MediaPipe "Right" label = user's LEFT hand (mirrored camera)
+        if (label0 === 'right') { toolHandIdx = 0; drawHandIdx = 1; }
+        else if (label1 === 'right') { toolHandIdx = 1; drawHandIdx = 0; }
+        else { toolHandIdx = 0; drawHandIdx = 1; }
+      }
 
-        // Determine mode-based drawing condition
-        const mode = modeSelect.value;
-        let shouldDraw = false;
+      // ── Process tool hand (left hand) ──
+      if (toolHandIdx >= 0 && allHands[toolHandIdx]) {
+        const toolLandmarks = allHands[toolHandIdx];
+        drawConnectors(overlayCtx, toolLandmarks, HAND_CONNECTIONS, {color: '#555', lineWidth: 1});
 
-        if(mode === 'always') shouldDraw = true;
-        else if(mode === 'index'){
-          // index extended if tip is above (smaller y) than pip (in camera coords y increases downward)
-          shouldDraw = (landmarks[8].y < landmarks[6].y);
-        }else if(mode === 'pinch'){
-          // pinch if distance between index tip and thumb tip small
-          const d = distance(tip, thumbTip);
-          shouldDraw = (d < 40);
+        const fc = countExtendedFingers(toolLandmarks);
+        leftHandFingerCount = fc;
+        let toolLabel = '';
+        if (fc === 1) { setToolByName('freehand'); toolLabel = '1 ✏️ Free'; }
+        else if (fc === 2) { setToolByName('line'); toolLabel = '2 ╱ Line'; }
+        else if (fc === 3) { setToolByName('rect'); toolLabel = '3 ▭ Rect'; }
+        else if (fc === 4) { setToolByName('circle'); toolLabel = '4 ◯ Circle'; }
+        else if (fc === 5) { setToolByName('arrow'); toolLabel = '5 → Arrow'; }
+
+        // Show label near tool hand
+        if (toolLabel) {
+          const wrist = normalizedToCanvas(toolLandmarks[0]);
+          overlayCtx.font = 'bold 14px Inter, system-ui';
+          overlayCtx.fillStyle = 'rgba(16,185,129,0.9)';
+          overlayCtx.fillText(toolLabel, wrist.x - 30, wrist.y - 20);
+        }
+      }
+
+      // ── Process drawing hand ──
+      const landmarks = allHands[drawHandIdx];
+      if (!landmarks) { overlayCtx.restore(); drawOverlayMsg(); return; }
+
+      // Draw skeleton
+      drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, {color: '#888', lineWidth: 2});
+      drawLandmarks(overlayCtx, landmarks, {color: '#fff', lineWidth: 1});
+
+      const tip = normalizedToCanvas(landmarks[8]);
+      const pip = normalizedToCanvas(landmarks[6]);
+      const thumbTip = normalizedToCanvas(landmarks[4]);
+      const palmC = normalizedToCanvas(getPalmCenter(landmarks));
+
+      // Draw pointer circle (size reflects pressure if enabled)
+      let effectiveSize = Number(sizeRange.value);
+      if (pressureToggle.checked) {
+        const ext = getFingerExtension(landmarks);
+        // Map extension 0.3-1.5 to 20%-100% of max size
+        const ratio = Math.min(Math.max((ext - 0.3) / 1.2, 0.2), 1.0);
+        effectiveSize = Math.round(effectiveSize * ratio);
+      }
+
+      overlayCtx.beginPath();
+      overlayCtx.arc(tip.x, tip.y, Math.max(4, effectiveSize / 2), 0, Math.PI * 2);
+      overlayCtx.fillStyle = 'rgba(16,185,129,0.7)';
+      overlayCtx.fill();
+      overlayCtx.lineWidth = 1.5;
+      overlayCtx.strokeStyle = 'rgba(16,185,129,0.9)';
+      overlayCtx.stroke();
+
+      // ── Gesture: Palette (fist) ──
+      if (gesturePaletteToggle.checked && !twoHandActive) {
+        if (isFist(landmarks)) {
+          if (fistStartTime === 0) fistStartTime = Date.now();
+          const elapsed = Date.now() - fistStartTime;
+          if (elapsed > 500) {
+            paletteVisible = true;
+            palettePos = {x: palmC.x, y: palmC.y};
+          }
+          // Show progress ring
+          if (!paletteVisible && elapsed > 100) {
+            overlayCtx.beginPath();
+            overlayCtx.arc(palmC.x, palmC.y, 30, -Math.PI/2, -Math.PI/2 + (elapsed/500) * Math.PI * 2);
+            overlayCtx.lineWidth = 3;
+            overlayCtx.strokeStyle = 'rgba(16,185,129,0.6)';
+            overlayCtx.stroke();
+          }
+          statusGesture.textContent = paletteVisible ? '🎨 Palette open' : '✊ Hold for palette...';
+        } else {
+          fistStartTime = 0;
+          if (paletteVisible) {
+            // Finger opened — pick color nearest to index tip
+            const picked = getPaletteColorAtPos(palettePos.x, palettePos.y, tip.x, tip.y);
+            if (picked) {
+              colorPicker.value = picked;
+              showOverlayMsg('Color: ' + picked);
+            }
+            paletteVisible = false;
+          }
+        }
+      }
+
+      if (paletteVisible) {
+        drawPalette(overlayCtx, palettePos.x, palettePos.y);
+        overlayCtx.restore();
+        drawOverlayMsg();
+        return; // Don't draw while palette is open
+      }
+
+      // ── Gesture: Undo/Redo (open palm swipe) ──
+      if (gestureUndoToggle.checked && isOpenPalm(landmarks) && !isPanning) {
+        const nowMs = Date.now();
+        if (nowMs > gestureUndoCooldown) {
+          if (prevPalmX !== null) {
+            const dx = palmC.x - prevPalmX;
+            if (dx > 80) { // swipe right = redo (mirrored)
+              doRedo();
+              showOverlayMsg('↪ Redo');
+              gestureUndoCooldown = nowMs + 600;
+              statusGesture.textContent = '↪ Redo';
+            } else if (dx < -80) { // swipe left = undo
+              doUndo();
+              showOverlayMsg('↩ Undo');
+              gestureUndoCooldown = nowMs + 600;
+              statusGesture.textContent = '↩ Undo';
+            }
+          }
+          prevPalmX = palmC.x;
+        }
+      } else {
+        prevPalmX = null;
+      }
+
+      // ── Gesture: Zoom & Pan (open palm hold) ──
+      if (zoomPanToggle.checked && isOpenPalm(landmarks)) {
+        if (!isPanning) {
+          isPanning = true;
+          panLastPos = {x: palmC.x, y: palmC.y};
+        } else {
+          const dx = palmC.x - panLastPos.x;
+          const dy = palmC.y - panLastPos.y;
+          viewTransform.offsetX += dx;
+          viewTransform.offsetY += dy;
+          panLastPos = {x: palmC.x, y: palmC.y};
+          redrawAll();
+        }
+        statusGesture.textContent = '✋ Panning';
+
+        // Two-hand pinch zoom
+        if (twoHandActive && allHands.length === 2 && toolHandIdx >= 0) {
+          const otherTip = normalizedToCanvas(allHands[toolHandIdx][8]);
+          const pinchDist = distance(tip, otherTip);
+          if (!window._lastPinchDist) window._lastPinchDist = pinchDist;
+          const zoomDelta = (pinchDist - window._lastPinchDist) * 0.005;
+          viewTransform.scale = Math.min(Math.max(viewTransform.scale + zoomDelta, 0.3), 5);
+          window._lastPinchDist = pinchDist;
+          redrawAll();
+          statusGesture.textContent = `🔍 Zoom ${Math.round(viewTransform.scale*100)}%`;
         }
 
-        // Smooth position
-        const target = {x: tip.x, y: tip.y};
-        if(!lastPos) lastPos = target;
-        lastPos = {x: lastPos.x + (target.x - lastPos.x)*(1 - smoothing), y: lastPos.y + (target.y - lastPos.y)*(1 - smoothing)};
+        overlayCtx.restore();
+        drawOverlayMsg();
+        return; // Don't draw while panning
+      } else {
+        isPanning = false;
+        panLastPos = null;
+        window._lastPinchDist = null;
+      }
 
-        if(shouldDraw){
-          if(!currentStroke){
-            currentStroke = {color: colorPicker.value, width: Number(sizeRange.value), points: [{x:lastPos.x,y:lastPos.y}]};
-            strokes.push(currentStroke);
-          } else {
-            currentStroke.points.push({x:lastPos.x,y:lastPos.y});
+      // ── Drawing condition ──
+      const mode = modeSelect.value;
+      let shouldDraw = false;
+
+      if (mode === 'always') shouldDraw = true;
+      else if (mode === 'index') {
+        shouldDraw = (landmarks[8].y < landmarks[6].y);
+      } else if (mode === 'pinch') {
+        shouldDraw = (distance(tip, thumbTip) < 40);
+      }
+
+      if (!isOpenPalm(landmarks) && !isFist(landmarks)) {
+        statusGesture.textContent = shouldDraw ? '✏️ Drawing' : '🖐️ Idle';
+      }
+
+      // Smooth position
+      const target = {x: tip.x, y: tip.y};
+      if (!lastPos) lastPos = target;
+      lastPos = {
+        x: lastPos.x + (target.x - lastPos.x) * (1 - smoothing),
+        y: lastPos.y + (target.y - lastPos.y) * (1 - smoothing)
+      };
+
+      // Apply inverse view transform so strokes are in world coords
+      const worldPos = canvasToView(lastPos);
+
+      // ── Shape tools ──
+      if (currentTool !== 'freehand') {
+        if (shouldDraw) {
+          if (!shapeActive) {
+            shapeStart = {x: worldPos.x, y: worldPos.y};
+            shapeActive = true;
           }
-          // draw incremental stroke to persistent canvas
-          drawCtx.beginPath();
+          // Preview shape on overlay
+          const previewStart = {
+            x: shapeStart.x * viewTransform.scale + viewTransform.offsetX,
+            y: shapeStart.y * viewTransform.scale + viewTransform.offsetY
+          };
+          drawShapePreview(overlayCtx, previewStart, lastPos, currentTool, colorPicker.value, effectiveSize);
+        } else if (shapeActive && shapeStart) {
+          // Release — finalize shape
+          const shapeStroke = {
+            type: 'shape',
+            shape: currentTool,
+            start: {x: shapeStart.x, y: shapeStart.y},
+            end: {x: worldPos.x, y: worldPos.y},
+            color: colorPicker.value,
+            width: effectiveSize
+          };
+          strokes.push(shapeStroke);
+          redoStack.length = 0;
+          redrawAll();
+          shapeStart = null;
+          shapeActive = false;
+        }
+      }
+      // ── Freehand drawing ──
+      else {
+        if (shouldDraw) {
+          if (!currentStroke) {
+            currentStroke = {
+              color: colorPicker.value,
+              width: effectiveSize,
+              points: [{x: worldPos.x, y: worldPos.y, w: effectiveSize}]
+            };
+            strokes.push(currentStroke);
+            redoStack.length = 0;
+          } else {
+            currentStroke.points.push({x: worldPos.x, y: worldPos.y, w: effectiveSize});
+          }
+
+          // Incremental draw
+          drawCtx.save();
+          drawCtx.translate(viewTransform.offsetX, viewTransform.offsetY);
+          drawCtx.scale(viewTransform.scale, viewTransform.scale);
           const pts = currentStroke.points;
-          if(pts.length >= 2){
-            drawCtx.moveTo(pts[pts.length-2].x, pts[pts.length-2].y);
-            drawCtx.lineTo(pts[pts.length-1].x, pts[pts.length-1].y);
-            drawCtx.lineWidth = currentStroke.width;
+          if (pts.length >= 2) {
+            drawCtx.beginPath();
+            drawCtx.moveTo(pts[pts.length - 2].x, pts[pts.length - 2].y);
+            drawCtx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+            drawCtx.lineWidth = effectiveSize;
             drawCtx.lineCap = 'round';
             drawCtx.strokeStyle = currentStroke.color;
             drawCtx.stroke();
           }
+          drawCtx.restore();
         } else {
-          // lift pen
+          // Pen lifted — try shape snap on the completed stroke
+          if (currentStroke) trySnapLastStroke();
           currentStroke = null;
         }
-
-      } else {
-        // no hands detected
-        lastPos = null;
-        currentStroke = null;
       }
 
       overlayCtx.restore();
+      drawOverlayMsg();
     }
 
-    // start
-    (async ()=>{
-      // try to get a typical size for video element so canvases match
+    function drawOverlayMsg() {
+      if (overlayMsg && Date.now() < overlayMsgTimer) {
+        overlayCtx.save();
+        overlayCtx.font = 'bold 22px Inter, system-ui';
+        overlayCtx.textAlign = 'center';
+        const alpha = Math.min(1, (overlayMsgTimer - Date.now()) / 400);
+        overlayCtx.fillStyle = `rgba(16,185,129,${alpha})`;
+        overlayCtx.fillText(overlayMsg, overlay.width / 2, 50);
+        overlayCtx.restore();
+      }
+    }
+
+    // ──────────────────────────────────────────────
+    //  STARTUP
+    // ──────────────────────────────────────────────
+    (async () => {
       await startCamera();
-      // small delay to ensure video dimensions available
-      setTimeout(()=>{
+      setTimeout(() => {
         const rect = video.getBoundingClientRect();
         overlay.width = drawCanvas.width = rect.width;
         overlay.height = drawCanvas.height = rect.height;
-      },300);
+      }, 300);
 
-      // watch for window resize
-      window.addEventListener('resize', ()=>{ setTimeout(()=>{ const rect=video.getBoundingClientRect(); overlay.width=drawCanvas.width=rect.width; overlay.height=drawCanvas.height=rect.height; },120); });
+      window.addEventListener('resize', () => {
+        setTimeout(() => {
+          const rect = video.getBoundingClientRect();
+          overlay.width = drawCanvas.width = rect.width;
+          overlay.height = drawCanvas.height = rect.height;
+          redrawAll();
+        }, 120);
+      });
+
+      updateStatusBar();
     })();
-
-    // helpers from drawing_utils are available (drawConnectors / drawLandmarks)
   </script>
 </body>
 </html>
